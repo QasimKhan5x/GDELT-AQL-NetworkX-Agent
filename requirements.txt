@@ -1,0 +1,8 @@
+nx-arangodb
+networkx
+adbnx-adapter
+git+https://github.com/arangoml/langchain.git@master#subdirectory=libs/community
+langchain-openai
+langgraph 
+pydantic
+python-dotenv
