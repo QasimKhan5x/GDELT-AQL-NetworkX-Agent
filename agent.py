@@ -22,7 +22,7 @@ from langchain_core.prompts import PromptTemplate
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import StateGraph, START, END
 
-from arangographqachain import ArangoGraphQAChain
+from arangodb import ArangoGraphQAChain
 
 nx.config.warnings_to_ignore.add("cache")
 

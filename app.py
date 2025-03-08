@@ -1,7 +1,7 @@
 import streamlit as st
 import re
 
-from arangographqachain import ArangoGraphQAChain
+from arangodb import ArangoGraphQAChain
 from agent import app, llm, arango_graph, G_adb
 from utils import show_graph, parse_node_ids
 
