@@ -199,7 +199,7 @@ Two steps were used here because we want to avoid delegating excessive tasks to 
 <example>
 Task: Find events from 2020 mentioning “kidnapping” in Eastern African countries in their event descriptions, and then show me the top 5 most countries with the highest number of such events.
 Plan: Search for all events that mention “kidnapping” in their descriptions, confirm they are in Eastern Africa via a graph traversal, and count how many times each country appears.
-_E1 = Text2ArangoSearch["Search the event descriptions for 'kidnapping', perform OUTBOUND traversal to confirm each event’s country is in Region/Eastern_Africa, filter the date to 2020, and gather the event IDs and associated country."]
+_E1 = Text2ArangoSearch["Search the event descriptions for 'kidnapping', perform OUTBOUND traversal to confirm each event's country is in Region/Eastern_Africa, filter the date to 2020, and gather the event IDs and associated country."]
 Plan: Using _E1, we will group by country, sort by the highest count, and pick the top five countries.
 _E2 = Text2AQL_Read["GROUP the events from _E1 by country, ORDER by count DESC, then RETURN the name and event count of the top 5."]
 
