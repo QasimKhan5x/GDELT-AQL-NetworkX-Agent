@@ -74,7 +74,8 @@ def generate_initial_view(pipeline_placeholder):
     a header and the graph.
     """
     with pipeline_placeholder.container():
-        show_graph(G_nx, target_ids=[])
+        fig = show_graph(G_nx, target_ids=[])
+        st.plotly_chart(fig, use_container_width=True)
 
 # ------------------------------ Page Configuration & State ------------------------------
 
