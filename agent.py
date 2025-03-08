@@ -166,9 +166,8 @@ Tools can be one of the following:
 (5) Text2ArangoSearch[text]: Converts natural language instructions into ArangoSearch queries for text-based filtering and ranking. Use this tool over Text2AQL_Read anytime the user wants to find events where a text field (e.g., description, label) must include certain words, phrases, or partial matches.
 
 <example>
-Task: Find the locations of the top 3 central events in Northern Africa between 2018 and 2020 that have "violence" in their label.
-Plan: Find all events between 2018 and 2020, whose label contains "violence" (case-insensitive),
-and are connected to Northern Africa via an OUTGOING path from th event to the region.
+Task: Find the locations of the top 3 central violent events in Northern Africa between 2018 and 2020.
+Plan: Find all events between 2018 and 2020, whose label contains "violence" and are connected to Northern Africa.
 _E1 = Text2AQL_Read["Return all event IDs location is in region = "Northern Africa" by following an OUTGOING path from the event to the region,
 dates lying between 2018-2020, lower(label) contains 'violence'."]
 Plan: Compute the degree centrality of the graph and then select the Event nodes in _E1 with the highest centrality score.

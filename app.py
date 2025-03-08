@@ -1,14 +1,10 @@
 import streamlit as st
-import time
 import re
-import random
-import plotly.graph_objects as go
-import networkx as nx
-
-from agent import app
 
 from arangographqachain import ArangoGraphQAChain
-from agent import llm, arango_graph, G_adb
+from agent import app, G_nx, llm, arango_graph, G_adb
+from utils import show_graph, parse_node_ids
+
 
 chain = ArangoGraphQAChain.from_llm(
     llm=llm,
@@ -20,65 +16,6 @@ chain.execute_aql_query = False
 config = {"configurable": {"thread_id": "1"}}
 
 # ------------------------------ Utility Functions ------------------------------
-
-def show_networkx_graph():
-    """Generates and displays a random NetworkX graph using Plotly."""
-    G = nx.random_geometric_graph(200, 0.125)
-    edge_x, edge_y = [], []
-    for edge in G.edges():
-        x0, y0 = G.nodes[edge[0]]['pos']
-        x1, y1 = G.nodes[edge[1]]['pos']
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-    edge_trace = go.Scatter(
-        x=edge_x, y=edge_y,
-        line=dict(width=0.5, color='#888'),
-        hoverinfo='none',
-        mode='lines'
-    )
-    node_x, node_y = [], []
-    for node in G.nodes():
-        x, y = G.nodes[node]['pos']
-        node_x.append(x)
-        node_y.append(y)
-    node_trace = go.Scatter(
-        x=node_x, y=node_y,
-        mode='markers',
-        hoverinfo='text',
-        marker=dict(
-            showscale=True,
-            colorscale='YlGnBu',
-            reversescale=True,
-            color=[],
-            size=10,
-            colorbar=dict(
-                thickness=15,
-                title=dict(text='Node Connections', side='right'),
-                xanchor='left',
-            ),
-            line_width=2
-        )
-    )
-    node_adjacencies = []
-    node_text = []
-    for node, adjacencies in G.adjacency():
-        node_adjacencies.append(len(adjacencies))
-        node_text.append('# of connections: ' + str(len(adjacencies)))
-    node_trace.marker.color = node_adjacencies
-    node_trace.text = node_text
-    fig = go.Figure(
-        data=[edge_trace, node_trace],
-        layout=go.Layout(
-            title='Random Geometric Graph',
-            title_x=0.5,
-            showlegend=False,
-            hovermode='closest',
-            margin=dict(b=20, l=5, r=5, t=40),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)
-        )
-    )
-    st.plotly_chart(fig, use_container_width=True)
 
 def display_chat(messages, placeholder):
     """Displays all chat messages within the given placeholder."""
@@ -98,11 +35,11 @@ def run_agent(user_input, pipeline_placeholder):
             if "planning" in s:
                 plan = s["planning"]["plan"].plan
                 for step in plan:
-                    tools.append(step.tool)
+                    tools.append({"tool": step.tool, "description": step.description})
                 for step in plan:
                     print(step)
             elif "tool" in s:
-                tool_name = tools[n]
+                tool_name = tools[n]["tool"]
                 tool_code = s["tool"]["code_results"][n]
                 if tool_name == "Text2AQL_Read":
                     st.markdown(f"**Step {n+ 1}: AQL Query**")
@@ -113,26 +50,36 @@ def run_agent(user_input, pipeline_placeholder):
                 st.markdown(f"```{tool_code}```")
             elif "generate" in s:
                 answer = s["generate"]["answer"]
+                target_ids = parse_node_ids(answer)
+                if target_ids:
+                    st.markdown(f"**Enclosing Subgraph Around the Answer**")
+                    fig = show_graph(G_nx, target_ids=target_ids)
+                    st.plotly_chart(fig, use_container_width=True)
+                else:
+                    st.markdown(f"**GDELT Open Intelligence**")
+                    fig = show_graph(G_nx, target_ids=[])
+                    st.plotly_chart(fig, use_container_width=True)
                 return answer
             else:
                 raise ValueError("Unexpected state")
             n += 1
             if n < len(tools):
-                st.markdown(f"*Executing Step {n + 1}...*")
+                st.markdown(f"*Executing Step {n + 1}: {tools[n]["description"]}*")
             if "generate" in s:
                 st.markdown("*Generating the final answer...*")
 
-def generate_pipeline_initial_view(pipeline_placeholder):
+def generate_initial_view(pipeline_placeholder):
     """
     Displays the initial view for the pipeline processing area:
-    a header and a random network graph.
+    a header and the graph.
     """
     with pipeline_placeholder.container():
-        show_networkx_graph()
+        show_graph(G_nx, target_ids=[])
 
 # ------------------------------ Page Configuration & State ------------------------------
 
 st.set_page_config(layout="wide")
+st.header('GDELT Open Intelligence Assistant')
 left_col, right_col = st.columns([1, 1])
 
 # Initialize session state if not present.
@@ -156,12 +103,12 @@ if "aql" not in st.session_state:
 with left_col:
     chat_placeholder = st.empty()
 with right_col:
-    st.subheader("Pipeline Processing")  
+    st.subheader("Agent Thought Process")  
     pipeline_placeholder = st.empty()
 
 display_chat(st.session_state["messages"], chat_placeholder)
 if not st.session_state["has_user_interacted"]:
-    generate_pipeline_initial_view(pipeline_placeholder)
+    generate_initial_view(pipeline_placeholder)
 
 # ------------------------------ Chat Input & Processing ------------------------------
 
