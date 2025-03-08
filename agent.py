@@ -34,10 +34,13 @@ db = client.db("_system", username="root", password="cBIEgJxUBKA8epaXkevE", veri
 
 with open("gdelt.pickle", "rb") as f:
     G_nx = pickle.load(f)
+with open("gdelt_und.pickle", "rb") as f:
+    G_und = pickle.load(f)
 
 G_adb = nxadb.Graph(name="OPEN_INTELLIGENCE", db=db)
 
 arango_graph = ArangoGraph(db)
+
 
 def get_graph_schema_json(G):
     """
@@ -45,28 +48,40 @@ def get_graph_schema_json(G):
     Captures unique node types, their attributes, and unique edge relationships.
     Also includes an example value from the graph for each node type.
     """
-    node_types = defaultdict(lambda: {"attributes": set(), "example_value": None})  # Store attributes and example values
+    node_types = defaultdict(
+        lambda: {"attributes": set(), "example_value": None}
+    )  # Store attributes and example values
     edge_types = defaultdict(set)
 
     # Extract node attributes and an example value
     for node, attrs in G.nodes(data=True):
-        node_type = node.split('/')[0] if '/' in node else "Unknown"
+        node_type = node.split("/")[0] if "/" in node else "Unknown"
         node_types[node_type]["attributes"].update(attrs.keys())
         if node_types[node_type]["example_value"] is None and attrs:
             if node_type == "Event" and "description_embedding" in attrs:
                 attrs["description_embedding"] = attrs["description_embedding"][:3]
-                attrs["description_embedding"] = [round(value, 4) for value in attrs["description_embedding"]]
+                attrs["description_embedding"] = [
+                    round(value, 4) for value in attrs["description_embedding"]
+                ]
             node_types[node_type]["example_value"] = attrs
 
     # Extract edge relationships and add edge names
     for u, v, attrs in G.edges(data=True):
-        u_type = u.split('/')[0] if '/' in u else "Unknown"
-        v_type = v.split('/')[0] if '/' in v else "Unknown"
+        u_type = u.split("/")[0] if "/" in u else "Unknown"
+        v_type = v.split("/")[0] if "/" in v else "Unknown"
 
         # Extract edge collection name from _id (substring before '/')
-        edge_name = attrs.get("_id", "Unknown/").split('/')[0] if "_id" in attrs else "UnknownEdge"
+        edge_name = (
+            attrs.get("_id", "Unknown/").split("/")[0]
+            if "_id" in attrs
+            else "UnknownEdge"
+        )
 
-        edge_key = (edge_name, v_type, tuple(sorted(attrs.keys())))  # Use tuple to maintain order and avoid duplicates
+        edge_key = (
+            edge_name,
+            v_type,
+            tuple(sorted(attrs.keys())),
+        )  # Use tuple to maintain order and avoid duplicates
         edge_types[u_type].add(edge_key)  # Store unique edges
 
     # Convert sets to lists for JSON compatibility
@@ -74,7 +89,7 @@ def get_graph_schema_json(G):
         "node_collections": {
             node_type: {
                 "attributes": sorted(attributes["attributes"]),
-                "example_value": attributes["example_value"]
+                "example_value": attributes["example_value"],
             }
             for node_type, attributes in node_types.items()
         },
@@ -83,14 +98,15 @@ def get_graph_schema_json(G):
                 "name": edge_name,
                 "source": src_type,
                 "target": dest_type,
-                "attributes": sorted(edge_attrs) if edge_attrs else []
+                "attributes": sorted(edge_attrs) if edge_attrs else [],
             }
             for src_type, edges in edge_types.items()
             for edge_name, dest_type, edge_attrs in sorted(edges)
-        ]
+        ],
     }
 
     return schema_json
+
 
 graph_schema_nx = get_graph_schema_json(G_nx)
 graph_schema_nx_string = json.dumps(graph_schema_nx)
@@ -111,24 +127,48 @@ llm = ChatOpenAI(
     max_tokens=None,
     max_retries=3,
 )
+llm_planner = ChatOpenAI(
+    model="o3-mini",
+    max_tokens=None,
+    max_retries=3,
+)
+
 
 class Step(BaseModel):
     """Represents a single step in the reasoning and retrieval process."""
 
     # step_number: int = Field(..., description="The sequential number of the step in the plan.")
-    description: str = Field(..., description="A brief explanation of the purpose of this step.")
-    tool: Literal["Text2AQL_Read", "Text2AQL_Write" ,"Text2NetworkX", "Text2Redirect", "Text2ArangoSearch"] = Field(..., description="The external tool used for this step.")
-    tool_input: str = Field(..., description="The instructions provided to the selected tool as input.")
-    evidence_variable: str = Field(..., description="A reference variable (e.g., _E1, _E2) storing the output of this step for later use.")
+    description: str = Field(
+        ..., description="A brief explanation of the purpose of this step."
+    )
+    tool: Literal[
+        "Text2AQL_Read",
+        "Text2AQL_Write",
+        "Text2NetworkX",
+        "Text2Redirect",
+        "Text2ArangoSearch",
+        "Text2GeospatialSearch",
+        "Text2SemanticSearch",
+    ] = Field(..., description="The external tool used for this step.")
+    tool_input: str = Field(
+        ..., description="The instructions provided to the selected tool as input."
+    )
+    evidence_variable: str = Field(
+        ...,
+        description="A reference variable (e.g., _E1, _E2) storing the output of this step for later use.",
+    )
 
     def __str__(self):
         """Returns the JSON representation of the object."""
         return json.dumps(self.model_dump(), indent=2)
 
+
 class ReWOOPlan(BaseModel):
     """Structured plan for solving a given task using step-by-step reasoning and external tools."""
 
-    plan: List[Step] = Field(..., description="A sequence of structured steps to solve the task efficiently.")
+    plan: List[Step] = Field(
+        ..., description="A sequence of structured steps to solve the task efficiently."
+    )
 
     def __iter__(self):
         for step in self.plan:
@@ -140,16 +180,18 @@ class ReWOOPlan(BaseModel):
     def __len__(self):
         return len(self.plan)
 
-planner_prompt = PromptTemplate.from_template("""
+
+planner_prompt = PromptTemplate.from_template(
+    """
 You are an AI planner that breaks down complex user queries over the ArangoDB graph database into structured steps while efficiently using available tools.
 For the given task, generate a step-by-step plan with the absolute minimum number of steps required such that it:
 1. Decomposes the problem into simple, logical steps.
-2. Selects the appropriate tool.
+2. Selects the appropriate tool and provide tool input using precise instructions and algorithmic vocabulary which is completely unambiguous.
 3. Ensures that each step depends logically on prior evidence if applicable.
-4. Merge multiple small actions (e.g., "finding events" + "filtering on a date") into a single step whenever possible.
-5. Absolutely no extra or split steps if it can be solved in one step. For instance:
-  5.1. DO NOT create one step to retrieve all paths and another to filter for the shortest path.
-  5.2. Instead, use a single step to retrieve the shortest paths directly.
+4. Merge at most two small actions (e.g., "finding events" + "filtering on a date") into a single step whenever possible.
+  4.1. DO NOT create one step to retrieve all paths and another to filter for the shortest path.
+  4.2. Instead, use a single step to retrieve the shortest paths directly.
+5. Do NOT assign more than two tasks to a single tool call because it increases the chance of errors.
 6. Do NOT provide Cypher as input to the tools! Always provide a precise structured English instruction
 7. For intermediate instructions, always return the _id of the documents so that they can be used in subsequent steps.
 
@@ -157,21 +199,31 @@ The schema of the graph is provided below.
 ```
 {schema}
 ```
+If edge is described as
+```
+{{'name': 'eventActor', 'source': 'Event', 'target': 'Actor',
+'attributes': ['_from', '_id', '_key', '_to']}}
+```
+That means Actor does INBOUND traversal and Event does OUTBOUND traversal. Actor cannot do OUTBOUND traversal and Event cannot do INBOUND traversal
 
 Tools can be one of the following:
-(1) Text2AQL_Read[text]: Converts natural language instructions into AQL read queries to retrieve structured data from the knowledge graph.
-(2) Text2AQL_Write[text]: Converts natural language instructions into AQL write queries for updating or modifying the knowledge graph.
-(3) Text2NetworkX[text]: Converts natural language instructions into graph analytics operations using NetworkX for deeper network-based reasoning over the knowledge graph. Can also be used to execute short Python scripts.
-(4) Text2Redirect[text]: Handles casual user inputs and gently redirects the user back to asking about the knowledge graph.
-(5) Text2ArangoSearch[text]: Converts natural language instructions into ArangoSearch queries for text-based filtering and ranking. Use this tool over Text2AQL_Read anytime the user wants to find events where a text field (e.g., description, label) must include certain words, phrases, or partial matches.
+Below are concise descriptions for each tool, 1–2 sentences each:
+1. Text2AQL_Read[text]: Generates AQL read queries for structured data retrieval from the knowledge graph. Used for numeric/date filters, grouping, sorting, lookups, and graph path traversals using known fields.
+2. Text2AQL_Write[text]: Generates AQL write queries to modify the knowledge graph (create, update, or delete data). Use this for any data modification operations.
+3. Text2NetworkX[text]: Generates graph analytics operations (e.g., centrality, shortest paths) in NetworkX. Can also execute short Python scripts if more advanced logic is required.
+4. Text2Redirect[text]: Handles casual/off-topic user inputs. Gently redirects the user to focus on the knowledge graph domain.
+5. Text2ArangoSearch[text]: Generates ArangoSearch queries for text-based filtering/ranking (like partial/fuzzy matches, BM25). Use whenever the user wants to find events containing certain words/phrases in text fields.
+6. Text2GeospatialSearch[text]: Generates AQL geospatial queries for distance or region-based location filtering. Use if the user asks for events near a certain point or within a radius.
+7. Text2SemanticSearch[text]: Generates AQL vector similarity searches for semantic matching. Use if the user wants conceptually similar events (e.g. "find events similar to...").
 
 <example>
 Task: Find the locations of the top 3 central violent events in Northern Africa between 2018 and 2020.
 Plan: Find all events between 2018 and 2020, whose label contains "violence" and are connected to Northern Africa.
-_E1 = Text2AQL_Read["Return all event IDs location is in region = "Northern Africa" by following an OUTGOING path from the event to the region,
-dates lying between 2018-2020, lower(label) contains 'violence'."]
+_E1 = Text2AQL_Read["Return all event IDs where location is reachable to region = "Northern Africa", 
+dates lying between 2018-2020, lower(label) contains 'violence'"]
 Plan: Compute the degree centrality of the graph and then select the Event nodes in _E1 with the highest centrality score.
-_E2 = Text2NetworkX["Compute graph centrality, filter the centralities to event nodes in _E1, sort by descending order of centrality, return event IDs of top 3"]
+_E2 = Text2NetworkX["Compute graph centrality, filter the centralities to event nodes in _E1, 
+sort by descending order of centrality, return event IDs of top 3"]
 Plan: Find the locations of the events from their event IDs in _E2
 _E3 = Text2AQL_Read["Return the location ID and name of the events in _E2"]
 
@@ -199,7 +251,7 @@ Two steps were used here because we want to avoid delegating excessive tasks to 
 <example>
 Task: Find events from 2020 mentioning "kidnapping" in Eastern African countries in their event descriptions, and then show me the top 5 most countries with the highest number of such events.
 Plan: Search for all events that mention "kidnapping" in their descriptions, confirm they are in Eastern Africa via a graph traversal, and count how many times each country appears.
-_E1 = Text2ArangoSearch["Search the event descriptions for 'kidnapping', perform OUTBOUND traversal to confirm each event's country is in Region/Eastern_Africa, filter the date to 2020, and gather the event IDs and associated country."]
+_E1 = Text2ArangoSearch["Search the event descriptions for 'kidnapping', perform OUTBOUND traversal to confirm each event's country is in Region/Eastern_Africa, filter the date to 2020, and return the event IDs and associated country."]
 Plan: Using _E1, we will group by country, sort by the highest count, and pick the top five countries.
 _E2 = Text2AQL_Read["GROUP the events from _E1 by country, ORDER by count DESC, then RETURN the name and event count of the top 5."]
 
@@ -208,9 +260,11 @@ Two steps were used here because the first step is an ArangoSearch-based text re
 
 Now generate a plan for the user's latest task in the given chat history: {task}
 Your Plan:
-""".strip(), partial_variables={"schema": graph_schema_nx_string})
+""".strip(),
+    partial_variables={"schema": graph_schema_nx_string},
+)
 
-planner_chain = planner_prompt | llm.with_structured_output(ReWOOPlan)
+planner_chain = planner_prompt | llm_planner.with_structured_output(ReWOOPlan)
 
 
 def summarize_schema(key, value, length=500):
@@ -288,7 +342,13 @@ def contains_null(data):
     return False  # Base case for other types (int, str, bool, float)
 
 
-def Text2AQL_Read(query: str, use_arango_search=False, **kwargs):
+def Text2AQL_Read(
+    query: str,
+    use_arango_search=False,
+    use_geospatial_search=False,
+    use_vector_search=False,
+    **kwargs,
+):
     """
     This tool is used to convert a natural language instruction (query) into an AQL query,
     execute it, and return the result.
@@ -298,8 +358,54 @@ def Text2AQL_Read(query: str, use_arango_search=False, **kwargs):
     """
 
     if use_arango_search:
-        print("Performing Text2AQL_Read using ArangoSearch")
-        query += """. Search in event_view. If you search description, use "text_en" analyzer. If you search label, use "norm_delimiter" analyzer. If a word ends with a common suffix—such as 'violent' or 'violence', extract the stem ('violen') and prefer functions like STARTS_WITH(violen') instead of exact matches."""
+        print("Performing ArangoSearch")
+        query += """\nInstructions: Search in event_view. If you search description, use "text_en" analyzer. If you search label, use "norm_delimiter" analyzer. If a word ends with a common suffix—such as 'violent' or 'violence', extract the stem ('violen') and prefer functions like STARTS_WITH(violen') instead of exact matches."""
+    elif use_geospatial_search:
+        example = """
+// Example AQL query that finds all events within 10 km of Event/ALG1 
+LET referenceCoord = FIRST(
+  FOR doc IN Event
+    FILTER doc._id == "Event/ALG1"
+    RETURN doc.geo
+)
+FOR ev IN event_view
+  SEARCH ANALYZER(
+    GEO_DISTANCE(ev.geo, referenceCoord) < 10000,
+    "geojson"
+  )
+  LET distance = GEO_DISTANCE(ev.geo, referenceCoord)
+  SORT distance
+  RETURN {
+    eventId: ev._id,
+    geo: ev.geo,
+    distance
+  }
+"""
+        print("Performing Geospatial Search")
+        query += f"""\nInstructions: Do not use the `.geo` attribute from any collection except `event_view`.
+If you need location-related data from other collections (e.g., `location`), you must only access it through path traversal from `event_view`.
+Use "geojson" analyzer. Use the below query as a template to generate the answer:```{example}```"""
+    elif use_vector_search:
+        example = """
+// Example AQL query that finds all top 3 events most semantically similar to Event/ALG1 
+LET refEmbedding = FIRST(
+  FOR ref IN Event
+    FILTER ref._id == "Event/ALG1"
+    RETURN ref.description_embedding
+)
+
+FOR ev IN Event
+  FILTER ev._id != "Event/ALG1"
+  LET similarity = COSINE_SIMILARITY(ev.description_embedding, refEmbedding)
+  SORT similarity DESC
+  LIMIT 3
+  RETURN {
+    eventId: ev._id,
+    similarity
+  }
+"""
+        query += f"""\nInstructions: Use the below query as a template to generate the answer:```{example}```"""
+        print("Performing Vector Search")
     else:
         print("Performing Text2AQL_Read")
     # Prepare instructions about previous output and its schema.
@@ -307,6 +413,15 @@ def Text2AQL_Read(query: str, use_arango_search=False, **kwargs):
     key, value = None, None
     if kwargs:
         key, value = list(kwargs.items())[0]
+        if use_geospatial_search or use_vector_search:
+            pattern = r"\b([A-Za-z]+/\w+)\b"
+            # find first occurrence
+            match = re.search(pattern, query)
+            if match:
+                value = match.group(1)
+            else:
+                return {"result": None, "script": ""}
+
         if isinstance(value, str):
             previous_output = (
                 f"\nYou must use the variable `{key}` in your query. Its schema is as follows: str\n"
@@ -320,12 +435,12 @@ def Text2AQL_Read(query: str, use_arango_search=False, **kwargs):
         elif isinstance(value, list) and all(isinstance(x, (str, int)) for x in value):
             if all(isinstance(x, str) for x in value):
                 previous_output = (
-                    f"\nYou must use the variable `{key}` in your query. Its schema is as follows: list[str]\n"
+                    f"\nYou must use the variable `{key}` in your query. Its schema is as follows: list[str]. Example of element inside `{key}`: {value[0]}\n"
                     f"Ensure that all operations correctly interpret and manipulate `{key}` based on this schema."
                 )
             else:
                 previous_output = (
-                    f"\nYou must use the variable `{key}` in your query. Its schema is as follows: list[int]\n"
+                    f"\nYou must use the variable `{key}` in your query. Its schema is as follows: list[int]. Example of element inside `{key}`: {value[0]}\n"
                     f"Ensure that all operations correctly interpret and manipulate `{key}` based on this schema."
                 )
         else:
@@ -354,11 +469,15 @@ def Text2AQL_Read(query: str, use_arango_search=False, **kwargs):
     while attempts < max_attempts:
         result = chain.invoke(query)
         aql = result["result"]
+        print(aql)
         if key:
-            executable_aql = aql.replace(f"{key}", f"{value}")
+            if isinstance(value, str):
+                executable_aql = aql.replace(f"{key}", f'"{value}"')
+            else:
+                executable_aql = aql.replace(f"{key}", f"{value}")
         else:
             executable_aql = aql
-        print(executable_aql)
+
         try:
             aql_result = list(G_adb.query(executable_aql))
         except AQLQueryExecuteError as e:
@@ -400,8 +519,54 @@ def Text2AQL_Read(query: str, use_arango_search=False, **kwargs):
             )
             print(f"Attempt {attempts} failed; retrying with modified query.")
             print("Query to be used:", query)
-    
+
     return {"result": None, "script": ""}
+
+
+def Text2AQL_Write(query: str):
+    """
+    This tool is used to convert a natural language instruction (query) into an AQL query,
+    execute it, and return the result.
+    Query is a natural language sentence with the intention to write into the database.
+    Either the result of the query or an error message (based on moderator approval) is returned.
+    """
+    print("Performing Text2AQL_Write")
+    chain = ArangoGraphQAChain.from_llm(
+        llm=llm,
+        graph=arango_graph,
+        verbose=True,
+        allow_dangerous_requests=True,
+    )
+    chain.execute_aql_query = False
+    previous_aql = None
+    tries = 0
+    while True:
+        try:
+            result = chain.invoke(query)
+            aql = result["result"]
+            approval_prompt = f"""The following AQL query can modify data:\n{aql}\n
+Type 'Y' to approve its execution.
+Type 'N' to regenerate the query.
+Any other input will cancel the operation:\n >>> """
+            user_response = input(approval_prompt)
+            if user_response.lower() == "y":
+                result = list(G_adb.query(aql))
+                # first 5 for brevity
+                return result[:5]
+            elif user_response.lower() != "n":
+                return "INFO: User cancelled query execution."
+            else:
+                if previous_aql is None:
+                    query += f"\nThe user rejected the following queries, so do not generate any of the following:\n```{aql}```"
+                    previous_aql = aql
+                else:
+                    query += f"\n```{aql}```"
+        except Exception as e:
+            tries += 1
+            print(f"EXEC ERROR: {e}")
+            if tries > 3:
+                print(f"exiting")
+                return f"EXEC ERROR: {e}"
 
 
 def Text2Redirect(query: str):
@@ -599,7 +764,13 @@ def get_plan(state: ReWOO_State):
 
     plan = planner_chain.invoke({"task": task})
 
-    return {"plan": plan, "current_step": 0, "history": history, "tool_results": {}, "code_results": []}
+    return {
+        "plan": plan,
+        "current_step": 0,
+        "history": history,
+        "tool_results": {},
+        "code_results": [],
+    }
 
 
 def execute_tool(state: ReWOO_State):
@@ -613,14 +784,26 @@ def execute_tool(state: ReWOO_State):
     tool_input = step_to_execute.tool_input
     evidence_variable = step_to_execute.evidence_variable
 
-    if tool in ("Text2AQL_Read",  "Text2ArangoSearch"):
+    if tool in (
+        "Text2AQL_Read",
+        "Text2ArangoSearch",
+        "Text2GeospatialSearch",
+        "Text2SemanticSearch",
+    ):
         if step_index == 0:
-            result = Text2AQL_Read(tool_input, use_arango_search=tool == "Text2ArangoSearch")
+            result = Text2AQL_Read(
+                tool_input,
+                use_arango_search=tool == "Text2ArangoSearch",
+                use_geospatial_search=tool == "Text2GeospatialSearch",
+                use_vector_search=tool == "Text2SemanticSearch",
+            )
         else:
             previous_evidence_variable = plan[step_index - 1].evidence_variable
             result = Text2AQL_Read(
                 tool_input,
                 use_arango_search=tool == "Text2ArangoSearch",
+                use_geospatial_search=tool == "Text2GeospatialSearch",
+                use_vector_search=tool == "Text2SemanticSearch",
                 **{
                     previous_evidence_variable: tool_results[previous_evidence_variable]
                 },
@@ -645,7 +828,11 @@ def execute_tool(state: ReWOO_State):
     else:
         raise ValueError(f"Unknown tool: {tool}")
 
-    return {"tool_results": tool_results, "current_step": step_index + 1, "code_results": code_results}
+    return {
+        "tool_results": tool_results,
+        "current_step": step_index + 1,
+        "code_results": code_results,
+    }
 
 
 def generate_answer(state: ReWOO_State):
@@ -670,10 +857,6 @@ def generate_answer(state: ReWOO_State):
 
     def is_id(value):
         return isinstance(value, str) and len(value.split("/")) == 2
-
-    # Normalize singleton ID to list
-    if isinstance(result, str) and is_id(result):
-        result = [result]
 
     # Case 1: result is a flat list of IDs
     if isinstance(result, list) and result and all(is_id(x) for x in result):
@@ -758,7 +941,7 @@ if __name__ == "__main__":
         "hybrid1": "Find all events in Kenya labeled 'Battles' or 'Violence_against_civilians' between 2019-2020, then compute the top 3 central actors participating in those events.",
         "hybrid2": "Find the top 3 events in Algeria that have the highest average number of fatalities. Then compute the betweenness scores of actors involved in those events and return the actor with the highest one.",
         "hybrid3": "Find the events in Northern Africa labeled Violence_against_civilians between 2018 and 2020, and identify the shortest paths between the earliest one and the latest one.",
-        "casual": "Tell me a random fun fact about cats!"
+        "casual": "Tell me a random fun fact about cats!",
     }
 
     # query = sample_queries["hybrid3"]

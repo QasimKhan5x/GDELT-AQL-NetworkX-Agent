@@ -2,10 +2,10 @@ import streamlit as st
 import re
 
 from arangographqachain import ArangoGraphQAChain
-from agent import app, G_nx, llm, arango_graph, G_adb
+from agent import app, llm, arango_graph, G_adb
 from utils import show_graph, parse_node_ids
 
-
+_key = 0
 chain = ArangoGraphQAChain.from_llm(
     llm=llm,
     graph=arango_graph,
@@ -17,17 +17,19 @@ config = {"configurable": {"thread_id": "1"}}
 
 # ------------------------------ Utility Functions ------------------------------
 
+
 def display_chat(messages, placeholder):
     """Displays all chat messages within the given placeholder."""
     with placeholder.container():
         for msg in messages:
             st.chat_message(msg["role"]).write(msg["content"])
 
+
 def run_agent(user_input, pipeline_placeholder):
     state = app.get_state(config).values
     history = state["history"] if state else []
     tools = []
-    n = -1 # -1 to account for the initial planning step
+    n = -1  # -1 to account for the initial planning step
 
     with pipeline_placeholder.container():
         st.markdown(f"**Planning how to answer the question...**")
@@ -51,14 +53,16 @@ def run_agent(user_input, pipeline_placeholder):
             elif "generate" in s:
                 answer = s["generate"]["answer"]
                 target_ids = parse_node_ids(answer)
+                global _key
                 if target_ids:
                     st.markdown(f"**Enclosing Subgraph Around the Answer**")
-                    fig = show_graph(G_nx, target_ids=target_ids)
+                    fig = show_graph(target_ids=target_ids)
                     st.plotly_chart(fig, use_container_width=True)
                 else:
                     st.markdown(f"**GDELT Open Intelligence**")
-                    fig = show_graph(G_nx, target_ids=[])
+                    fig = show_graph(target_ids=[])
                     st.plotly_chart(fig, use_container_width=True)
+                _key += 1
                 return answer
             else:
                 raise ValueError("Unexpected state")
@@ -68,24 +72,28 @@ def run_agent(user_input, pipeline_placeholder):
             if "generate" in s:
                 st.markdown("*Generating the final answer...*")
 
+
 def generate_initial_view(pipeline_placeholder):
     """
     Displays the initial view for the pipeline processing area:
     a header and the graph.
     """
     with pipeline_placeholder.container():
-        fig = show_graph(G_nx, target_ids=[])
+        fig = show_graph(target_ids=[])
         st.plotly_chart(fig, use_container_width=True)
+
 
 # ------------------------------ Page Configuration & State ------------------------------
 
 st.set_page_config(layout="wide")
-st.header('GDELT Open Intelligence Assistant')
+st.header("GDELT Open Intelligence Assistant")
 left_col, right_col = st.columns([1, 1])
 
 # Initialize session state if not present.
 if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "How can I help you?"}]
+    st.session_state["messages"] = [
+        {"role": "assistant", "content": "How can I help you?"}
+    ]
 if "has_user_interacted" not in st.session_state:
     st.session_state["has_user_interacted"] = False
 # Flags for controlling approval flow.
@@ -104,7 +112,7 @@ if "aql" not in st.session_state:
 with left_col:
     chat_placeholder = st.empty()
 with right_col:
-    st.subheader("Agent Thought Process")  
+    st.subheader("Agent Thought Process")
     pipeline_placeholder = st.empty()
 
 display_chat(st.session_state["messages"], chat_placeholder)
@@ -121,7 +129,7 @@ if user_input:
     # Always add the user's message immediately.
     st.session_state["messages"].append({"role": "user", "content": user_input})
     display_chat(st.session_state["messages"], chat_placeholder)
-    
+
     # If we are already awaiting approval, treat this input as the approval response.
     if st.session_state["awaiting_approval"]:
         st.session_state["approval_response"] = user_input
@@ -135,8 +143,11 @@ if user_input:
 if st.session_state["current_input"] and not st.session_state["awaiting_approval"]:
     user_msg = st.session_state["current_input"]
 
-    
-    if re.search(r'\b(?:modify|update|change|insert|delete|remove|add)\b', user_msg, re.IGNORECASE):
+    if re.search(
+        r"\b(?:modify|update|change|insert|delete|remove|add)\b",
+        user_msg,
+        re.IGNORECASE,
+    ):
         # For write operations, use the Text2AQL_Write tool.
         print("Performing Text2AQL_Write")
         tries = 0
@@ -171,13 +182,18 @@ Any other input will also **cancel** the operation."""
     else:
         response = run_agent(st.session_state["current_input"], pipeline_placeholder)
         if response is not None:
-            st.session_state["messages"].append({"role": "assistant", "content": response})
+            st.session_state["messages"].append(
+                {"role": "assistant", "content": response}
+            )
         else:
             st.session_state["messages"].append(
-                {"role": "assistant", "content": "I'm sorry, I don't have an answer for that."}
+                {
+                    "role": "assistant",
+                    "content": "I'm sorry, I don't have an answer for that.",
+                }
             )
         display_chat(st.session_state["messages"], chat_placeholder)
-        st.session_state["current_input"] = ""        
+        st.session_state["current_input"] = ""
 
 # If we are awaiting approval and an approval response has been provided, process it.
 if st.session_state["awaiting_approval"] and st.session_state["approval_response"]:
@@ -187,7 +203,9 @@ if st.session_state["awaiting_approval"] and st.session_state["approval_response
         final_response = "The database has been modified successfully."
     else:
         final_response = "The operation was cancelled."
-    st.session_state["messages"].append({"role": "assistant", "content": final_response})
+    st.session_state["messages"].append(
+        {"role": "assistant", "content": final_response}
+    )
     display_chat(st.session_state["messages"], chat_placeholder)
     # Reset approval flags.
     st.session_state["awaiting_approval"] = False
