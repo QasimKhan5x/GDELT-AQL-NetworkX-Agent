@@ -57,11 +57,11 @@ def run_agent(user_input, pipeline_placeholder):
                 if target_ids:
                     st.markdown(f"**Enclosing Subgraph Around the Answer**")
                     fig = show_graph(target_ids=target_ids)
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key=str(_key))
                 else:
                     st.markdown(f"**GDELT Open Intelligence**")
                     fig = show_graph(target_ids=[])
-                    st.plotly_chart(fig, use_container_width=True)
+                    st.plotly_chart(fig, use_container_width=True, key=str(_key))
                 _key += 1
                 return answer
             else:
