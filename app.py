@@ -68,7 +68,7 @@ def run_agent(user_input, pipeline_placeholder):
                 raise ValueError("Unexpected state")
             n += 1
             if n < len(tools):
-                st.markdown(f"*Executing Step {n + 1}: {tools[n]["description"]}*")
+                st.markdown(f"*Executing Step {n + 1}: {tools[n]['description']}*")
             if "generate" in s:
                 st.markdown("*Generating the final answer...*")
 
