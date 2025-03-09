@@ -52,11 +52,8 @@ def show_graph(target_ids, hops=2, max_nodes=50, palette=None):
         target_ids = ["Source/0001d6445b831d6a538e2d482186b60d"]
 
     # Get the nodes to include from the BFS layers.
-    print("performing bfs")
     nodes_included = sample_bfs_layers(G_und, target_ids, hops, max_nodes)
-    print("subgraphing")
     subG = G_und.subgraph(nodes_included)
-    print("subgraphed")
     # Compute positions using Kamada–Kawai layout.
     pos = nx.kamada_kawai_layout(subG)
 
