@@ -382,7 +382,7 @@ FOR ev IN event_view
   }
 """
         print("Performing Geospatial Search")
-        query += f"""\nInstructions: Do not use the `.geo` attribute from any collection except `event_view`.
+        query += f"""\nInstructions: Do not use the `.geo` attribute from any collection except `event_view`. Do not use location.geo directly.
 If you need location-related data from other collections (e.g., `location`), you must only access it through path traversal from `event_view`.
 Use "geojson" analyzer. Use the below query as a template to generate the answer:```{example}```"""
     elif use_vector_search:
