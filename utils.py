@@ -191,7 +191,7 @@ def show_graph(target_ids, hops=2, max_nodes=50, palette=None):
 
 
 # Regex pattern to capture identifiers in the form "class/key"
-pattern = r"\b([A-Za-z]+/\w+)\b"
+pattern = r"\b([A-Za-z]+/[\w\/\-]+)\b"
 
 
 def parse_node_ids(message: str) -> List[str]:
