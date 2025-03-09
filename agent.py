@@ -849,7 +849,7 @@ def generate_answer(state: ReWOO_State):
 
     # shorten the results
     for key, value in intermediate_results.items():
-        intermediate_results[key] = json.dumps(value)[:200]
+        intermediate_results[key] = str(value)[:200]
 
     if not result:
         history.append("No answer found.")
